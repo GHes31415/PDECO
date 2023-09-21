@@ -1,0 +1,1 @@
+In this folder I will add examples and projects in the direction of PDECO 
