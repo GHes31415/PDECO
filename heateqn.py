@@ -12,6 +12,7 @@ f = beta -2 -2*alpha
 
 import dolfin as dl 
 import matplotlib.pyplot as plt
+import numpy as np 
 
 # Constants of the problem
 alpha = 3; beta = 1.2
@@ -49,4 +50,34 @@ v = dl.TrialFunction(V)
 f = dl.Constant(beta-2-2*alpha)
 
 F = u*v*dl.dx + dt*dl.dot(dl.grad(u),dl.grad(v))*dl.dx -(u_n+dt*f)*v*dl.dx
-a,L = dl.Lhs(F),dl.Rhs(F)
+# Dolfin figures out which terms belon to the lhs and rhs
+a,L = dl.lhs(F),dl.rhs(F)
+
+u = dl.Function(V)
+
+# Time-stepping
+t = 0 
+for n in range(num_steps):
+
+    #Update current time
+    t+= dt
+    u_D.t = t
+
+    #Compute solution 
+    dl.solve(a==L,u,bc)
+
+    dl.plot(u)
+
+    # Compute error at vertices 
+
+    u_e = dl.interpolate(u_D,V)
+    error = np.abs(u_e.vector().array()-u.vector().array()).max()
+    print('t = %.2f:error = %.3g'%(t,error))
+
+    #Update previous solution
+    u_n.assign(u)
+
+# Hold plot 
+dl.interactive()
+
+
