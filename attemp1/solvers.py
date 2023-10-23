@@ -14,13 +14,13 @@ Problem 1
 
 Diffusion system with reaction term 
 
-u_t = (D(x)u_x)_x + g(x)                [0,1]x[0,1]
+u_t = (D(x)u_x)_x + g(t)                [0,1]x[0,1]
 u   = 0                                 [0,1]x[0]
 u   = 0                                 [0]x[0,1]u[1]x[0,1] 
 
 D(x) = 0.01(|f(x)|+1)
 
-f(x) and g(x) are GRF with laplacian prior 
+f(x) and g(t) are GRF with laplacian prior 
 
 The domain is partition in a mesh of 100x100
 
@@ -69,6 +69,7 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
     # won't be loss of generality by saving the samples
     sensor_1 = sample_d.get_local()
     sensor_2 = sample_g.get_local()
+    # Now d and g can be evaluated as functions
     d = hp.vector2Function(sample_d,V)
     exp_D= ufl.exp(d)
     g = hp.vector2Function(sample_g,V_t)
@@ -89,13 +90,12 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
     u = dl.TrialFunction(V)
     v = dl.TestFunction(V)
     t = 0
-    print(g(t))
     # Weak formulation
     a = u*v*dl.dx+dt*(exp_D)*dl.inner(dl.grad(u),dl.grad(v))*dl.dx
     L = (u_n + dt*g(t))*v*dl.dx  
 
     u = dl.Function(V)
-
+    # Solve solution of PDE
     final_u = np.zeros((nx+1,nt))
     
     final_u[:,0] = u_n.vector().get_local()
@@ -108,7 +108,7 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
 
         # if time_dep_boundary:
         #     u_D.t = t
-        # update the value of the rhs 
+        # update the value of the rhs , is there a better way of doign this?
         L = (u_n + dt*g(t))*v*dl.dx  
         #Compute solution 
         dl.solve(a==L,u,bc)
@@ -119,6 +119,7 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
         
         #Update previous solution
         u_n.assign(u)
+    
 
     return sensor_1,sensor_2,final_u.reshape(((nx+1)*nt,))
 
