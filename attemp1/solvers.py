@@ -96,12 +96,12 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
 
     u = dl.Function(V)
     # Solve solution of PDE
-    final_u = np.zeros((nx+1,nt))
+    final_u = np.zeros((nx+1,nt+1))
     
     final_u[:,0] = u_n.vector().get_local()
     
 
-    for n in range(1,nt):
+    for n in range(1,nt+1):
 
         #Update current time
         t+= dt

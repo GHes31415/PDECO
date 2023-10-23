@@ -26,10 +26,10 @@ def run( Nx,T, Nt, num_train, num_test,gamma= 0.1,delta = 0.5):
     #Initial condition
     u0 = dl.Constant(0.0)#dl.Expression('sin(2*pi*x[0])',degree = 2)
     #Data for trunk network
-    xt = [(x, y) for x in np.linspace(x0, x1, Nx) for y in np.linspace(0, T, Nt)]
+    xt = [(x, y) for x in np.linspace(x0, x1, Nx+1) for y in np.linspace(0, T, Nt+1)]
     #Data for training and testing
     data_train = {}
-    data_generation(num_test, Nx, Nt, gamma, delta, x0, x1, t0, t1, u0,data_train)
+    data_generation(num_train, Nx, Nt, gamma, delta, x0, x1, t0, t1, u0,data_train)
     data_train['xt'] = xt
     pickle.dump(data_train, open("data/DR_train.pkl", "wb"))
     data_test = {}
