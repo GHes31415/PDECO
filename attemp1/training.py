@@ -3,8 +3,28 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import argparse
+from torch.utils.data import Dataset, DataLoader
 
-# Define the neural network
+# Define the dataset class
+class PDECO_Dataset(Dataset):
+    '''
+    Dataset = (X,y)
+    X = (sensors_1,sensors_2,xt)
+    y = solution
+    '''
+    # Initialize the dataset
+    def __init__(self, data):
+        self.x = data[0]
+        self.y = data[1]
+    # Define the getitem function
+    def __getitem__(self, index):
+        return (self.x[0][index],self.x[1][index],self.x[2]),self.y[index]
+    # Define the len function
+    def __len__(self):
+        return len(self.x[0])
+ 
+        
+
 
 class FeedForwardNN(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size, activation_fn, dropout_prob=0.0):
@@ -26,6 +46,81 @@ class FeedForwardNN(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+
+
+# Define MIONET
+
+
+class MIONET(nn.Module):
+
+    def __init__(self,n_branches ,input_sizes, architectures, output_size,eval_point_imag, activation_fn, dropout_prob =0.0,device='cpu' ):
+        '''
+        n_branches = number of branch
+        input_sizes = list of input sizes for each branch and trunk
+        architectures = list of architectures for each branch and trunk
+        output_size = output size of the branch and trunk
+        eval_point_imag = number of points to evaluate in the image space
+        activation_fn = activation function for the branch and trunk       
+        '''
+        super(MIONET,self).__init__()
+
+        self.n_branches = n_branches
+        self.eval_point_imag = eval_point_imag
+        # nn.ModulesList is a list of nn.Modules
+        self.branch_nets = nn.ModuleList([FeedForwardNN(input_sizes[i], architectures[i], output_size, activation_fn, dropout_prob).to(device) for i in range(n_branches)])
+        self.device = device
+        self.trunk_net = FeedForwardNN(input_sizes[-1], architectures[-1], output_size, activation_fn, dropout_prob)
+
+    def forward(self, x):
+
+        # x = (sensor_1,sensor_2,...,sensor_k,xt)
+        # sensors are input of branch nets
+        # xt is input of trunk net
+
+        sensors = x[:-1]
+        xt = x[-1]
+
+        trunk_output = self.trunk_net(xt)
+    
+        # Initialize the dot product to do element wise product
+        dot_product = self.branch_nets[0](sensors[0])
+
+        # Do the element wise product
+        for i in range(1,self.n_branches):
+            dot_product = torch.mul(dot_product,self.branch_nets[i](sensors[i]))
+
+        results = torch.zeros((sensors[0].shape[0],self.eval_point_imag)).to(self.device)
+        
+        for i in range(self.eval_point_imag):
+            results[:, i] = torch.bmm(dot_product.unsqueeze(1), trunk_output[:, i, :].unsqueeze(-1)).squeeze()
+        
+
+        return results#dot_product
+
+
+# Define the training loop
+
+def train(model,dataloader,criterion,optimizer):
+    model.train()
+    running_loss = 0.0
+
+    for inputs,targets in dataloader:
+        # Remember to zero grad the optimizer
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(inputs)
+        loss = criterion(outputs,targets)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item() * inputs[0].size(0)
+
+    epoch_loss = running_loss / len(dataloader.dataset)
+
+    return epoch_loss
+
+
 
 
 
@@ -69,6 +164,7 @@ def main(args):
     activation_fn = args.activation_fn
     training_data_path = args.training_data_path
     testing_data_path = args.testing_data_path
+    eval_point_imag = 110
 
     data_points = 200
     testing_points = 200
@@ -82,7 +178,12 @@ def main(args):
         return None
 
     # Define the neural network
-    branch_control_net,branch_uncertainty_net,trunk_net = assign_networks(len_control,len_uncertainty,eval_point_dim,arch_branch,arch_trunk,dot_layer,activation_fn,device)
+    # branch_control_net,branch_uncertainty_net,trunk_net = assign_networks(len_control,len_uncertainty,eval_point_dim,arch_branch,arch_trunk,dot_layer,activation_fn,device)
+    model = MIONET(n_branches=2,input_sizes=[len_control,len_uncertainty,eval_point_dim],architectures=[arch_branch,arch_branch,arch_trunk],output_size=dot_layer,eval_point_imag= eval_point_imag,activation_fn=eval(activation_fn),device=device).to(device)
+    # Loss funciton
+    criterion = nn.MSELoss()
+    # Optimizer
+    optimizer = optim.SGD(model.parameters(),lr=lr)
 
 
     # The data is a dictionary, the keys of the dictionaries are the experiment number 0-num_exps
@@ -92,7 +193,7 @@ def main(args):
     # xt_train = torch.tensor(training_data['xt']).float().to(device)
     # Temporary fix for xt_train
 
-    xt = torch.tensor([(x, y) for x in np.linspace(0, 1, len_control) for y in np.linspace(0, 1, len_uncertainty-1)]).to(device)
+    xt = torch.tensor([(x, y) for x in torch.linspace(0, 1, len_control) for y in torch.linspace(0, 1, len_uncertainty-1)]).to(device)
 
 
 
@@ -108,10 +209,33 @@ def main(args):
 
     X_train = (sensors_1,sensors_2,xt)
 
+    data_train = X_train,y_train
+    data_loader = DataLoader(PDECO_Dataset(data_train),batch_size=50,shuffle=True)
+    for epoch in range(epochs):
+        epoch_loss = train(model,data_loader,criterion,optimizer)
+        print('Epoch: {} Loss: {}'.format(epoch,epoch_loss))
 
+    
+    # Testing  
+    sensors_1 = torch.zeros((testing_points,len_control)).to(device)
+    sensors_2 = torch.zeros((testing_points,len_uncertainty)).to(device)
+    y_test = torch.zeros((testing_points,len(xt))).to(device)
+
+    for i in range(testing_points):
+        sensors_1[i,:] = torch.tensor(testing_data[i]['sensors'][0])
+        sensors_2[i,:] = torch.tensor(testing_data[i]['sensors'][1])
+        y_test[i,:] = torch.tensor(testing_data[i]['solution'])
+    
+    X_test = (sensors_1,sensors_2,xt)
+    data_test = X_test,y_test
+    data_loader_test = DataLoader(PDECO_Dataset(data_test),batch_size=10,shuffle=True)
+    model.eval()
+    
 
 
     
+
+
 
 
 
@@ -123,15 +247,15 @@ if __name__ == '__main__':
     parser.add_argument("--Problem", type=str,default='Heat1D', help="PDE to solve")
     parser.add_argument("--Sc", type=int, default=11, help="Number of samples control")
     parser.add_argument("--Su", type=int,default=11, help="Number of samples uncertain parameter")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
-    parser.add_argument("--arch_trunk", type=list, default=[], help="Batch size")
-    parser.add_argument("--arch_branch", type=list, default=[], help="Number of samples uncertain parameter")
+    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default= int(1e3), help="Number of training epochs")
+    parser.add_argument("--arch_trunk", type=list, default=[], help="Architecture of the trunk")
+    parser.add_argument("--arch_branch", type=list, default=[], help="Architecture of the branch")
     parser.add_argument("--dot_layer",type=int,default=200,help="Output of the trunk and branch")
     parser.add_argument("--eval_point_dim", type=int, default=2, help="Dimension of the evaluation point (x,t)")
     parser.add_argument("--activation_fn", type=str, default="nn.ReLU", help="Activation function")
     parser.add_argument("--training_data_path", type=str, default="/work2/Sebas/OUU_MIONET/PDECO/attemp1/data/DR_train.pkl", help="Path to training data")
-    parser.add_argument("--testing_data_path", type=str, default="/work2/Sebas/OUU_MIONET/PDECO/attemp1/data/DR_test.pkl", help="Path to test data")
+    parser.add_argument("--testing_data_path", type=str, default="/work2/Sebas/OUU_MIONET/PDECO/attemp1/data/DR_test.pkl", help="Path to test data")   
     # parser.add_argument("--dropout_prob", type=float, default=0.0, help="Dropout probability")
     # parser.add_argument("--seed", type=int, default=0, help="Random seed")
     # parser.add_argument("--logdir", type=str, default="logs", help="Directory for logs")
