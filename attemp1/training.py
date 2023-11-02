@@ -5,6 +5,9 @@ import torch.optim as optim
 import argparse
 from torch.utils.data import Dataset, DataLoader
 
+
+# Think of data normalization 
+
 # Define the dataset class
 class PDECO_Dataset(Dataset):
     '''
@@ -91,6 +94,7 @@ class MIONET(nn.Module):
 
         results = torch.zeros((sensors[0].shape[0],self.eval_point_imag)).to(self.device)
         
+        # Check einsum torch
         for i in range(self.eval_point_imag):
             results[:, i] = torch.bmm(dot_product.unsqueeze(1), trunk_output[:, i, :].unsqueeze(-1)).squeeze()
         
@@ -133,14 +137,6 @@ def network(problem,m):
     return branch,trunk
 
 
-def assign_networks(len_control,len_uncertainty,eval_point_dim,arch_branch,arch_trunk,dot_layer,activation_fn,device):
-
-    branch_control_net = FeedForwardNN(input_size=len_control, hidden_sizes=arch_branch, output_size=dot_layer, activation_fn=eval(activation_fn))
-    branch_uncertainty_net = FeedForwardNN(input_size=len_uncertainty, hidden_sizes=arch_branch, output_size=dot_layer, activation_fn=eval(activation_fn))
-    trunk_net = FeedForwardNN(input_size=eval_point_dim,hidden_sizes=arch_trunk,output_size=dot_layer,activation_fn=eval(activation_fn))
-
-    return branch_control_net.to(device),branch_uncertainty_net.to(device),trunk_net.to(device)
-
 def run():
 
     return 0
@@ -182,7 +178,7 @@ def main(args):
     model = MIONET(n_branches=2,input_sizes=[len_control,len_uncertainty,eval_point_dim],architectures=[arch_branch,arch_branch,arch_trunk],output_size=dot_layer,eval_point_imag= eval_point_imag,activation_fn=eval(activation_fn),device=device).to(device)
     # Loss funciton
     criterion = nn.MSELoss()
-    # Optimizer
+    # Optimizer, modify to ADAM
     optimizer = optim.SGD(model.parameters(),lr=lr)
 
 

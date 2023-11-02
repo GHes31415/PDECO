@@ -8,7 +8,12 @@ import matplotlib.pyplot as plt
 import numpy as np 
 import hippylib as hp
 import ufl 
+import logging
+# import pdb
+# pdb.set_trace()
 
+logging.getLogger('FFC').setLevel(logging.WARNING)
+dl.set_log_level(dl.LogLevel.WARNING)
 '''
 Problem 1
 
@@ -53,11 +58,12 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
     # t = np.linspace(t0, t1, nt)
     mesh_space = dl.IntervalMesh(nx,x0,x1)
     mesh_time = dl.IntervalMesh(nt,t0,t1)
+
     dt = (t1-t0)/nt
 
     #Functional space
-    V = dl.FunctionSpace(mesh_space,'P',1)
-    V_t = V = dl.FunctionSpace(mesh_time,'P',1)
+    V = dl.FunctionSpace(mesh_space,'CG',1)
+    V_t = dl.FunctionSpace(mesh_time,'P',1)
 
     #Random functions
     GRF = hp.LaplacianPrior(V, gamma, delta)
@@ -77,22 +83,30 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
      #Boundary 
 
     
-    def boundary(x,on_boundary):
-        return on_boundary
-    u_D = u0
-    bc  = dl.DirichletBC(V,u_D,boundary)
+    # def boundary(x,on_boundary):
+    #     return on_boundary
+    
+    # u_D = u0
+    bc  = dl.DirichletBC(V,u0,'on_boundary')
 
     # Initial value
 
-    u_n = dl.interpolate(u_D,V)
-
+    u_n = dl.interpolate(u0,V)
+    
     # Define the variational problem 
     u = dl.TrialFunction(V)
     v = dl.TestFunction(V)
-    t = 0
-    # Weak formulation
-    a = u*v*dl.dx+dt*(exp_D)*dl.inner(dl.grad(u),dl.grad(v))*dl.dx
-    L = (u_n + dt*g(t))*v*dl.dx  
+    t = t0
+    # Weak formulation do ti explicitly
+    space_g = dl.Function(V)
+    a = u*v*dl.dx+dt*(exp_D)*dl.inner(dl.grad(u),dl.grad(v))*dl.dx 
+    L = (u_n + dt*space_g)*v*dl.dx
+    
+    A,b = dl.assemble_system(a,L,bc)    
+    # mumps: multifrontal massively parallel sparse direct solver
+    solver = dl.LUSolver(A,'mumps')
+    
+    
 
     u = dl.Function(V)
     # Solve solution of PDE
@@ -104,24 +118,25 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
     for n in range(1,nt+1):
 
         #Update current time
-        t+= dt
+        t = t0 + n*dt
 
         # if time_dep_boundary:
         #     u_D.t = t
-        # update the value of the rhs , is there a better way of doign this?
-        L = (u_n + dt*g(t))*v*dl.dx  
+        # update the value of the rhs , value g(t_{n+1})
+        space_g.assign(dl.Constant(g(t)))
+        b = dl.assemble(L)
+    
         #Compute solution 
-        dl.solve(a==L,u,bc)
+        solver.solve(A,u.vector(),b)
 
         #save
-
         final_u[:,n] = u.vector().get_local()
         
         #Update previous solution
         u_n.assign(u)
     
-
-    return sensor_1,sensor_2,final_u.reshape(((nx+1)*nt,))
+    # Use fenics data structure to save data, check ad_diff in hippylib specially for large scale probls
+    return sensor_1,sensor_2,final_u.reshape(((nx+1)*(nt+1),))
 
 def sol_diff_plot(gamma = 0.1, delta = 0.5, experiment = 0,plot = False,time_dep_boundary = lambda t:0):
     '''
@@ -130,7 +145,7 @@ def sol_diff_plot(gamma = 0.1, delta = 0.5, experiment = 0,plot = False,time_dep
     
     # Constants of the problem 
     T = 1.0
-    num_steps = 100
+    num_steps = 10
     dt = T/num_steps
 
     # Geometry of the problem 
