@@ -80,7 +80,7 @@ def sol_diff_sys(x0,x1,t0,t1,u0,nx,nt,gamma = 0.1, delta = 0.5):
     exp_D= ufl.exp(d)
     g = hp.vector2Function(sample_g,V_t)
 
-     #Boundary 
+    #Boundary 
 
     
     # def boundary(x,on_boundary):
