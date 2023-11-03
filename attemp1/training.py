@@ -5,6 +5,8 @@ import torch.optim as optim
 import argparse
 from torch.utils.data import Dataset, DataLoader
 
+from models import *
+
 
 # Think of data normalization 
 
@@ -25,81 +27,6 @@ class PDECO_Dataset(Dataset):
     # Define the len function
     def __len__(self):
         return len(self.x[0])
- 
-        
-
-
-class FeedForwardNN(nn.Module):
-    def __init__(self, input_size, hidden_sizes, output_size, activation_fn, dropout_prob=0.0):
-        super(FeedForwardNN, self).__init__()
-        
-        self.layers = nn.ModuleList()
-        prev_size = input_size
-        
-        for hidden_size in hidden_sizes:
-            self.layers.append(nn.Linear(prev_size, hidden_size))
-            self.layers.append(activation_fn())
-            if dropout_prob > 0:
-                self.layers.append(nn.Dropout(p=dropout_prob))
-            prev_size = hidden_size
-
-        self.layers.append(nn.Linear(prev_size, output_size, bias=False))
-        
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-
-
-# Define MIONET
-
-
-class MIONET(nn.Module):
-
-    def __init__(self,n_branches ,input_sizes, architectures, output_size,eval_point_imag, activation_fn, dropout_prob =0.0,device='cpu' ):
-        '''
-        n_branches = number of branch
-        input_sizes = list of input sizes for each branch and trunk
-        architectures = list of architectures for each branch and trunk
-        output_size = output size of the branch and trunk
-        eval_point_imag = number of points to evaluate in the image space
-        activation_fn = activation function for the branch and trunk       
-        '''
-        super(MIONET,self).__init__()
-
-        self.n_branches = n_branches
-        self.eval_point_imag = eval_point_imag
-        # nn.ModulesList is a list of nn.Modules
-        self.branch_nets = nn.ModuleList([FeedForwardNN(input_sizes[i], architectures[i], output_size, activation_fn, dropout_prob).to(device) for i in range(n_branches)])
-        self.device = device
-        self.trunk_net = FeedForwardNN(input_sizes[-1], architectures[-1], output_size, activation_fn, dropout_prob)
-
-    def forward(self, x):
-
-        # x = (sensor_1,sensor_2,...,sensor_k,xt)
-        # sensors are input of branch nets
-        # xt is input of trunk net
-
-        sensors = x[:-1]
-        xt = x[-1]
-
-        trunk_output = self.trunk_net(xt)
-    
-        # Initialize the dot product to do element wise product
-        dot_product = self.branch_nets[0](sensors[0])
-
-        # Do the element wise product
-        for i in range(1,self.n_branches):
-            dot_product = torch.mul(dot_product,self.branch_nets[i](sensors[i]))
-
-        results = torch.zeros((sensors[0].shape[0],self.eval_point_imag)).to(self.device)
-        
-        # Check einsum torch
-        for i in range(self.eval_point_imag):
-            results[:, i] = torch.bmm(dot_product.unsqueeze(1), trunk_output[:, i, :].unsqueeze(-1)).squeeze()
-        
-
-        return results#dot_product
 
 
 # Define the training loop
@@ -128,11 +55,11 @@ def train(model,dataloader,criterion,optimizer):
 
 
 
-def network(problem,m):
+def network(problem):
 
     if problem == 'Heat1D':
-        branch = [m,200]
-        trunk = [2,200]
+        branch = [200]
+        trunk = [200]
 
     return branch,trunk
 
@@ -160,15 +87,14 @@ def main(args):
     activation_fn = args.activation_fn
     training_data_path = args.training_data_path
     testing_data_path = args.testing_data_path
-    eval_point_imag = 110
-
-    data_points = 200
-    testing_points = 200
+    data_points = args.data_points
+    testing_points= args.testing_points
+    eval_point_imag = args.eval_point_imag
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if arch_trunk == [] and arch_branch == []:
-        arch_branch,arch_trunk= network(problem,len_control)
+        arch_branch,arch_trunk= network(problem)
     else:
         print('Invalid arch_trunk and arch_branch arguments')
         return None
@@ -243,13 +169,16 @@ if __name__ == '__main__':
     parser.add_argument("--Problem", type=str,default='Heat1D', help="PDE to solve")
     parser.add_argument("--Sc", type=int, default=11, help="Number of samples control")
     parser.add_argument("--Su", type=int,default=11, help="Number of samples uncertain parameter")
+    parser.add_argument("--data_points", type=int, default=100, help="Number of data points")
+    parser.add_argument("--testing_points", type=int, default=20, help="Number of testing points")
+    parser.add_argument("--eval_point_imag", type=int, default=110, help="(Nx+1)*(Nt+1)")
     parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
     parser.add_argument("--epochs", type=int, default= int(1e3), help="Number of training epochs")
     parser.add_argument("--arch_trunk", type=list, default=[], help="Architecture of the trunk")
     parser.add_argument("--arch_branch", type=list, default=[], help="Architecture of the branch")
     parser.add_argument("--dot_layer",type=int,default=200,help="Output of the trunk and branch")
     parser.add_argument("--eval_point_dim", type=int, default=2, help="Dimension of the evaluation point (x,t)")
-    parser.add_argument("--activation_fn", type=str, default="nn.ReLU", help="Activation function")
+    parser.add_argument("--activation_fn", type=str, default="nn.Tanh", help="Activation function")
     parser.add_argument("--training_data_path", type=str, default="/work2/Sebas/OUU_MIONET/PDECO/attemp1/data/DR_train.pkl", help="Path to training data")
     parser.add_argument("--testing_data_path", type=str, default="/work2/Sebas/OUU_MIONET/PDECO/attemp1/data/DR_test.pkl", help="Path to test data")   
     # parser.add_argument("--dropout_prob", type=float, default=0.0, help="Dropout probability")
